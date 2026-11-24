@@ -1,0 +1,57 @@
+name: Decode staged images
+
+on:
+  push:
+    paths:
+      - "staging/**"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  decode:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Decode staging files into x-posts
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          files=(staging/*)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No staging files."
+            exit 0
+          fi
+          mkdir -p x-posts
+          decoded=0
+          for f in staging/*; do
+            base=$(basename "$f")
+            case "$base" in
+              *.jpg.b64|*.jpeg.b64|*.png.b64|*.gif.b64|*.webp.b64)
+                out_name=${base%.b64}
+                if [[ "$out_name" == *"/"* || "$out_name" == *".."* ]]; then
+                  echo "Skipping unsafe name: $base"
+                  continue
+                fi
+                base64 -d "$f" > "x-posts/$out_name"
+                git rm -f "$f"
+                git add "x-posts/$out_name"
+                decoded=$((decoded+1))
+                echo "Decoded $f -> x-posts/$out_name"
+                ;;
+              *)
+                echo "Skipping unrecognized staging file: $base"
+                ;;
+            esac
+          done
+          if [ "$decoded" -eq 0 ]; then
+            echo "Nothing to commit."
+            exit 0
+          fi
+          git config user.name "hwcg-media"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Publish decoded image(s) to x-posts"
+          git push
